@@ -250,6 +250,7 @@ module Hledger.Cli.Commands.Balance (
  ,multiBalanceReportHtmlRows
  ,balanceReportAsTable
  ,balanceReportTableAsText
+ ,balanceReportAsHtml
  ,tests_Balance
 ) where
 
@@ -340,6 +341,7 @@ balance opts@CliOpts{rawopts_=rawopts,reportopts_=ropts@ReportOpts{..}} j = do
                 "txt"  -> balanceReportAsText
                 "csv"  -> \ropts r -> (++ "\n") $ printCSV $ balanceReportAsCsv ropts r
                 "json" -> const $ (++"\n") . TL.unpack . toJsonText
+                "html" -> (++"\n") . TL.unpack . L.renderText . balanceReportAsHtml ropts
                 _      -> const $ error' $ unsupportedOutputFormatError fmt
           writeOutput opts $ render ropts report
 
@@ -631,6 +633,53 @@ balanceReportTableAsText ropts@ReportOpts{..} = tableAsText ropts showamt
       | no_elide_ = showMixedAmountOneLineWithoutPrice color_
       | otherwise = showMixedAmountElided color_
 
+-- | Render a balance report as HTML.
+balanceReportAsHtml :: ReportOpts -> BalanceReport -> Html ()
+balanceReportAsHtml ropts br =
+  let
+    (headingsrow,bodyrows,mtotalsrow) = balanceReportHtmlRows ropts br
+  in
+    table_ $ mconcat $
+         [headingsrow]
+      ++ bodyrows
+      ++ maybeToList mtotalsrow
+
+balanceReportHtmlRows :: ReportOpts -> BalanceReport -> (Html (), [Html ()], Maybe (Html ()))
+balanceReportHtmlRows ropts mbr =
+  let
+    headingsrow:rest | transpose_ ropts = error' "Sorry, --transpose is not supported with HTML output yet"
+                     | otherwise = balanceReportAsCsv ropts mbr
+    (bodyrows, mtotalsrow) | no_total_ ropts = (rest,      Nothing)
+                           | otherwise       = (init rest, Just $ last rest)
+  in
+    (balanceReportHtmlHeadRow ropts headingsrow
+    ,map (balanceReportHtmlBodyRow ropts) bodyrows
+    ,balanceReportHtmlFootRow ropts <$> mtotalsrow -- TODO pad totals row with zeros when there are
+    )
+
+-- | Render one BalanceReport totals row as a HTML table row.
+balanceReportHtmlFootRow :: ReportOpts -> [String] -> Html ()
+balanceReportHtmlFootRow _ropts [] = mempty
+-- TODO pad totals row with zeros when subreport is empty
+--  multiBalanceReportHtmlFootRow ropts $
+--     ""
+--   : repeat nullmixedamt zeros
+--  ++ (if row_total_ ropts then [nullmixedamt] else [])
+--  ++ (if average_ ropts   then [nullmixedamt]   else [])
+balanceReportHtmlFootRow ropts (acct:rest) =
+  let
+    defstyle = style_ "text-align:right"
+    (amts,tot,avg)
+      | row_total_ ropts && average_ ropts = (init $ init rest, [last $ init rest], [last rest])
+      | row_total_ ropts                   = (init rest,        [last rest],        [])
+      |                     average_ ropts = (init rest,        [],                 [last rest])
+      | otherwise                          = (rest,             [],                 [])
+  in
+    tr_ $ mconcat $
+          th_ [style_ "text-align:left"]             (toHtml acct)
+       : [th_ [class_ "amount coltotal", defstyle]   (toHtml a) | a <- amts]
+      -- ++ [th_ [class_ "amount coltotal", defstyle]   (toHtml a) | a <- tot]
+      -- ++ [th_ [class_ "amount colaverage", defstyle] (toHtml a) | a <- avg]
 
 tests_Balance = tests "Balance" [
 
