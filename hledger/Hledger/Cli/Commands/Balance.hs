@@ -341,7 +341,7 @@ balance opts@CliOpts{rawopts_=rawopts,reportopts_=ropts@ReportOpts{..}} j = do
                 "txt"  -> balanceReportAsText
                 "csv"  -> \ropts r -> (++ "\n") $ printCSV $ balanceReportAsCsv ropts r
                 "json" -> const $ (++"\n") . TL.unpack . toJsonText
-                "html" -> (++"\n") . TL.unpack . L.renderText . balanceReportAsHtml ropts
+                "html" -> const $ (++"\n") . TL.unpack . L.renderText . balanceReportAsHtml ropts
                 _      -> const $ error' $ unsupportedOutputFormatError fmt
           writeOutput opts $ render ropts report
 
@@ -637,26 +637,26 @@ balanceReportTableAsText ropts@ReportOpts{..} = tableAsText ropts showamt
 balanceReportAsHtml :: ReportOpts -> BalanceReport -> Html ()
 balanceReportAsHtml ropts br =
   let
-    (headingsrow,bodyrows,mtotalsrow) = balanceReportHtmlRows ropts br
+    (headingsrow,bodyrows) = balanceReportHtmlRows ropts br
   in
     table_ $ mconcat $
          [headingsrow]
       ++ bodyrows
-      ++ maybeToList mtotalsrow
 
-balanceReportHtmlRows :: ReportOpts -> BalanceReport -> (Html (), [Html ()], Maybe (Html ()))
-balanceReportHtmlRows ropts mbr =
+balanceReportHtmlRows :: ReportOpts -> BalanceReport -> (Html (), [Html ()])
+balanceReportHtmlRows ropts balrep = 
+--
   let
     headingsrow:rest | transpose_ ropts = error' "Sorry, --transpose is not supported with HTML output yet"
-                     | otherwise = balanceReportAsCsv ropts mbr
-    (bodyrows, mtotalsrow) | no_total_ ropts = (rest,      Nothing)
+                     | otherwise = balanceReportAsCsv ropts balrep
+    (bodyrows, _) | no_total_ ropts = (rest,      Nothing)
                            | otherwise       = (init rest, Just $ last rest)
   in
     (balanceReportHtmlHeadRow ropts headingsrow
     ,map (balanceReportHtmlBodyRow ropts) bodyrows
-    ,balanceReportHtmlFootRow ropts <$> mtotalsrow -- TODO pad totals row with zeros when there are
+    --,balanceReportHtmlFootRow ropts <$> mtotalsrow -- TODO pad totals row with zeros when there are
     )
-
+-- }
 -- | Render one BalanceReport totals row as a HTML table row.
 balanceReportHtmlFootRow :: ReportOpts -> [String] -> Html ()
 balanceReportHtmlFootRow _ropts [] = mempty
@@ -669,7 +669,7 @@ balanceReportHtmlFootRow _ropts [] = mempty
 balanceReportHtmlFootRow ropts (acct:rest) =
   let
     defstyle = style_ "text-align:right"
-    (amts,tot,avg)
+    (amts,_,_)
       | row_total_ ropts && average_ ropts = (init $ init rest, [last $ init rest], [last rest])
       | row_total_ ropts                   = (init rest,        [last rest],        [])
       |                     average_ ropts = (init rest,        [],                 [last rest])
@@ -680,6 +680,42 @@ balanceReportHtmlFootRow ropts (acct:rest) =
        : [th_ [class_ "amount coltotal", defstyle]   (toHtml a) | a <- amts]
       -- ++ [th_ [class_ "amount coltotal", defstyle]   (toHtml a) | a <- tot]
       -- ++ [th_ [class_ "amount colaverage", defstyle] (toHtml a) | a <- avg]
+
+-- | Render one BalanceReport heading row as a HTML table row.
+balanceReportHtmlHeadRow :: ReportOpts -> [String] -> Html ()
+balanceReportHtmlHeadRow _ [] = mempty  -- shouldn't happen
+balanceReportHtmlHeadRow ropts (acct:rest) =
+  let
+    defstyle = style_ ""
+    (amts,tot,avg)
+      | row_total_ ropts && average_ ropts = (init $ init rest, [last $ init rest], [last rest])
+      | row_total_ ropts                   = (init rest,        [last rest],        [])
+      |                     average_ ropts = (init rest,        [],                 [last rest])
+      | otherwise                          = (rest,             [],                 [])
+  in
+    tr_ $ mconcat $
+          td_ [class_ "account"]              (toHtml acct)
+       : [td_ [class_ "", defstyle]           (toHtml a) | a <- amts]
+      ++ [td_ [class_ "rowtotal", defstyle]   (toHtml a) | a <- tot]
+      ++ [td_ [class_ "rowaverage", defstyle] (toHtml a) | a <- avg]
+
+-- | Render one BalanceReport data row as a HTML table row.
+balanceReportHtmlBodyRow :: ReportOpts -> [String] -> Html ()
+balanceReportHtmlBodyRow _ [] = mempty  -- shouldn't happen
+balanceReportHtmlBodyRow ropts (label:rest) =
+  let
+    defstyle = style_ "text-align:right"
+    (amts,tot,avg)
+      | row_total_ ropts && average_ ropts = (init $ init rest, [last $ init rest], [last rest])
+      | row_total_ ropts                   = (init rest,        [last rest],        [])
+      |                     average_ ropts = (init rest,        [],                 [last rest])
+      | otherwise                          = (rest,             [],                 [])
+  in
+    tr_ $ mconcat $
+          td_ [class_ "account", style_ "text-align:left"]  (toHtml label)
+       : [td_ [class_ "amount", defstyle]            (toHtml a) | a <- amts]
+      ++ [td_ [class_ "amount rowtotal", defstyle]   (toHtml a) | a <- tot]
+      ++ [td_ [class_ "amount rowaverage", defstyle] (toHtml a) | a <- avg]
 
 tests_Balance = tests "Balance" [
 
